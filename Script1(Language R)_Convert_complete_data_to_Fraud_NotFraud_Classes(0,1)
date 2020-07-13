@@ -1,0 +1,153 @@
+library(readr)
+library(dplyr)
+library(lubridate)
+library(stringr)
+library(splitstackshape)
+library(tidyverse)
+
+data <- read_csv('C:/Users/Noah/Desktop/SCEL - Capstone/data/ASU_D11_Fraud Detection - Retailer Locations_Examples.csv')
+
+date_index_column <- data %>% select(`Retailer ID(s)`, `(Additional) Date Reference(s) for Cashings`)
+date_index_column <- date_index_column %>% drop_na()
+date_column <- date_index_column[,2]
+
+for(i in 1:nrow(date_column)){
+  if(str_detect(date_column[i,],'and')){
+    date_column[i, ] <- gsub(' and ', ',', date_column[i, ])
+  }
+  if(str_detect(date_column[i,],';')){
+    date_column[i, ] <- gsub(';', ',', date_column[i, ])
+  }
+  if(str_detect(date_column[i,],'; ')){
+    date_column[i, ] <- gsub('; ', ',', date_column[i, ])
+  }
+  if(str_detect(date_column[i, ],', ')){
+    date_column[i, ] <- gsub(', ', ',', date_column[i, ])
+  }
+  if(str_detect(date_column[i,], regex(date_column[i, ], dotall = TRUE))){
+    date_column[i, ] <- gsub('\n', ',', date_column[i, ])
+  }
+  if(str_detect(date_column[i, ],',,')){
+    date_column[i, ] <- gsub(',,', ',', date_column[i, ])
+  }
+  if(str_detect(date_column[i,],' ')){
+    date_column[i, ] <- gsub(' ', ',', date_column[i, ])
+  }
+}
+
+
+date_lst <- strsplit(
+  date_column$`(Additional) Date Reference(s) for Cashings`, ",")
+date_range_lst <- list()
+
+for(i in 1:length(date_lst)){
+  for(j in 1:length(date_lst[[i]])){
+    if(str_detect(date_lst[[i]][[j]],'-')){
+      temp <- list(i, date_lst[[i]][[j]])
+      lst_ranges <- list(temp)
+      date_range_lst <- append(date_range_lst, lst_ranges)
+    }
+  }
+}
+
+date_range_df <- t(as.data.frame(matrix(unlist(date_range_lst), nrow=length(unlist(date_range_lst[1])))))
+date_range_df <- as_data_frame(date_range_df)
+
+date_intervals <- strsplit(date_range_df$V2, "-")
+
+ranges <-list()
+for(i in 1:length(date_intervals)){
+  date_range <- as.list(seq(mdy(date_intervals[[i]][1]), mdy(date_intervals[[i]][2]), by = 1))
+  
+  temp <- list(i, date_range)
+  ranges<- append(ranges, list(temp))
+}
+
+for(i in 1:length(date_lst)){
+  for(j in 1:length(date_lst[[i]])){
+    if(str_detect(date_lst[[i]][[j]],'-')){
+      date_lst[[i]][[j]] <- '*'
+    }
+  }
+}
+
+date_df <- c()
+
+for(i in 1:length(date_lst)){
+  for(j in 1:length(date_lst[[i]])){
+    temp <- c(i, date_lst[[i]][j])
+    date_df <- rbind(date_df, temp)
+  }
+}
+
+date_df <- as_data_frame(date_df)
+
+date_interval_df <- c()
+for(i in 1:length(ranges)){
+  for(j in 1:length(ranges[[i]][[2]])){
+    x <- ranges[[i]][1]
+    temp <- c(x, toString(ranges[[i]][[2]][[j]]))
+    date_interval_df <- rbind(date_interval_df, temp)
+  }
+}
+
+date_interval_df <- as_data_frame(date_interval_df)
+
+target_one <- c()
+for(i in 1:nrow(date_df)){
+  x <- as.integer(date_df[i, 1])
+  temp <- c(date_index_column[x, 1], date_df[i, 2])
+  target_one <- rbind(target_one, temp)
+}
+
+target_one <- as_data_frame(target_one)
+target_one <- target_one %>% filter(V2 != '*')
+target_one <- target_one %>% mutate(V2 = mdy(V2))
+
+target_two_half <- c()
+for(i in 1:nrow(date_interval_df)){
+  x <- as.integer(date_interval_df[[1]][[i]]) 
+  temp <- c(date_range_df[x, 1], date_interval_df[[2]][[i]])
+  target_two_half <- rbind(target_two_half, temp)
+}
+
+target_two_half <- as_data_frame(target_two_half)
+
+target_two <- c()
+for(i in 1:nrow(target_two_half)){
+  x <- as.integer(target_two_half[[1]][[i]]) 
+  temp <- c(date_index_column[x, 1], target_two_half[[2]][[i]])
+  target_two <- rbind(target_two, temp)
+}
+
+target_two <- as_data_frame(target_two)
+target_two <- target_two %>% mutate(V2 = ymd(V2))
+
+target <- rbind(target_one, target_two)
+
+target['fraud'] <- 1
+
+rm(data, date_column, date_df, date_index_column, date_interval_df, date_intervals, date_lst,
+   date_range, date_range_df, date_range_lst, lst_ranges, ranges, target_one, target_two,
+   target_two_half, temp)
+
+sales_data <- read_csv('C:/Users/Noah/Desktop/SCEL - Capstone/data/ASU_D11_Retailer_Daily_Sales_200206.csv')
+
+#`Total Instant Cashes`, `Total Online Cashes`, `P3 Cashes`, `P4 Cashes`, `Powerball Cashes`,
+#`PC5 Cashes`, `APLY Cashes`, `Mega Millions Cashes`, `LFL Cashes`
+
+# sales_data <- sales_data %>% filter(`Total Instant Cashes`!=0&`Total Online Cashes`!=0&`P3 Cashes`!=0&
+#                                       `P4 Cashes`!=0&`Powerball Cashes`!=0&`PC5 Cashes`!=0&`APLY Cashes`!=0&
+#                                       `Mega Millions Cashes`!=0&`LFL Cashes`!=0)
+
+sales_data <- sales_data %>% rename('retailer' = `Retailer Number`)
+target <- target %>% rename('retailer' = `Retailer ID(s)`)
+target <- target %>% mutate(retailer = as.numeric(retailer))
+
+# sales_data['retailer'] <- as.numeric(sales_data['retailer'])
+# target['retailer'] <- as.numeric(target['retailer'])
+
+total_data <- sales_data %>% left_join(target, by = c('Date' = 'V2', 'retailer'))
+total_data[is.na(total_data)] <- 0
+
+write_csv(total_data, path = 'C:/Users/Noah/Desktop/SCEL - Capstone/data/total_data.csv')

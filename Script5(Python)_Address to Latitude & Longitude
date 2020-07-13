@@ -1,0 +1,97 @@
+
+import matplotlib.pyplot
+import pandas as pd
+import sklearn as sk
+import numpy as np
+from sklearn.model_selection import train_test_split
+from imblearn.under_sampling import RandomUnderSampler
+from geopy.extra.rate_limiter import RateLimiter
+from geopy.geocoders import Nominatim
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn import metrics
+
+data = pd.read_csv('C:/Users/Noah/Desktop/SCEL - Capstone/data/total_data.csv')
+data = data.drop('Retailer Name', axis = 1)
+
+y = data['fraud']
+x = data.drop('fraud', axis = 1)
+#421 cases of fraud
+#print(data['Business Type'].unique())
+
+#undersampling
+rus = RandomUnderSampler(sampling_strategy=0.8)
+x_res, y_res = rus.fit_resample(x, y)
+x_res = pd.DataFrame(x_res)
+y_res = pd.DataFrame(y_res)
+y_res['fraud'] = y_res[0]
+y_res = y_res.drop(0, axis = 1)
+
+#turning address into latitude and longitude
+locator = Nominatim(user_agent = 'myGeocoder')
+
+# 1 - conveneint function to delay between geocoding calls
+geocode = RateLimiter(locator.geocode, min_delay_seconds = 1)
+
+# 2- - create location column
+x_res['location'] = x_res[2].apply(geocode)
+
+# 3 - create longitude, laatitude and altitude from location column (returns tuple)
+x_res['point'] = x_res['location'].apply(lambda loc: tuple(loc.point) if loc else
+                                         None)
+
+# 4 - split point column into latitude, longitude and altitude columns
+x_res[['latitude', 'longitude', 'altitude']] = pd.DataFrame(
+    x_res['point'].tolist(), index = x_res.index)
+
+#drop unecessary columns/ change names
+x_res['Business Type'] = x_res[7]
+x_res = x_res.drop([2, 3, 4, 5, 6, 7, 'location', 'point', 'altitude'], axis = 1)
+
+#get rid of any nan's
+temp = pd.concat([x_res, y_res], axis = 1)
+temp = temp.dropna()
+y_res = temp['fraud']
+x_res = temp.drop('fraud', axis = 1)
+
+#break up into train and test
+xtrain, xtest, ytrain, ytest = train_test_split(x_res, y_res, test_size = 0.2)
+
+xtrain = xtrain.copy()
+xtest = xtest.copy()
+ytrain = ytrain.copy()
+ytest = ytest.copy()
+
+#ohe categorical variables/ scale numerical variables
+#ohe business type
+categorical_features = ['Business Type']
+
+categorical_transformer = Pipeline(steps = [
+        ('ohe', OneHotEncoder(sparse = False, dtype = int,
+                              handle_unknown='ignore'))])
+
+preprocessor = ColumnTransformer(
+        transformers = [('cat', categorical_transformer, categorical_features)],
+                remainder = 'drop')
+
+#neural network classification base model
+nn = Pipeline(steps = [
+        ('pp', preprocessor),
+        ('nn',MLPClassifier())])
+
+#fit data
+nn.fit(xtrain, ytrain) 
+
+#predict test
+nn_ypred = nn.predict(xtest)
+
+#evaluate predictions
+print(metrics.accuracy_score(ytest, nn_ypred))
+print(metrics.confusion_matrix(ytest, nn_ypred))
+print(metrics.classification_report(ytest, nn_ypred))
+
+
+
